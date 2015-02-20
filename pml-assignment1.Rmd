@@ -1,0 +1,132 @@
+---
+title: "Practical Machine Learning - Assignment 1"
+author: "Duy Bui"
+date: "Saturday, January 10, 2015"
+output:
+  html_document:
+    keep_md: yes
+---
+
+##Synopsis
+The following analysis practices the usage of machine learning techniques to solve a real-life problem. The goal of this practice is to predict the manner of each personal activity set. The data were collected from the accelerometers on the belt, forearm, arm, and dumbell of 6 participants. The analysis was initiated by pre-processing the data. After that, the data were split into training and testing sets, then were used to build the classification model. Out-of-sample and in-sample errors were estimated to evaluate the classification model.    
+
+##Analysis
+First of all, we read the data from csv files
+```{r, warning=FALSE}
+library(caret)
+pml.train <- read.csv(file = "pml-training.csv", header = TRUE, sep = ",")
+pml.test <- read.csv(file = "pml-testing.csv", header = TRUE, sep = ",")
+```
+
+###Pre-process the data
+#####1. Remove NA columns
+We remove all the columns having only NAs value in the testing data since they are meaningless when it comes to prediction. Simultaneously, we remove those columns in the training data 
+
+```{r, echo=TRUE}
+pml.train <- pml.train[,which(unlist(lapply(pml.test, function(x)!all(is.na(x)))))]
+pml.test <- pml.test[,which(unlist(lapply(pml.test, function(x)!all(is.na(x)))))]
+```
+
+#####2. Remove unimportant columns
+The data set now only contains 60 variables. It is quite obvious that we could eliminate timestamp and name variables in the prediction model. Therefore, 5 following variables will be eliminated (X, raw_timestamp_part_1, raw_timestamp_part_2, cvtd_timestamp and name)
+
+```{r, echo=TRUE}
+excl.list <- c("X", "raw_timestamp_part_1", "raw_timestamp_part_2", "cvtd_timestamp", "user_name")
+eliminateCol <- function(dat, excl.list){
+  excl.index = which(names(dat) %in% excl.list)
+  dat <- subset(dat, select = -excl.index)
+  dat
+}
+
+pml.train <- eliminateCol(pml.train, excl.list)
+pml.test <- eliminateCol(pml.test, excl.list)
+```
+
+#####3. Remove near-zero variance columns
+As some predictors could become zero-variance or near zero-variance when the data is split into training/testing set, it is better to eliminate the near-zero variance predictors. In order to find the near-zero variance predictors, we use the method nearZeroVar in caret package
+
+```{r, echo=TRUE}
+nzv <- nearZeroVar(pml.train, saveMetrics= TRUE)
+nzv[nzv$nzv,]
+```
+
+From the analysis, we know that new_window is a near-zero variance predictor, which should be eliminated. 
+
+```{r, echo=TRUE}
+
+excl.list <- c("new_window")
+pml.train <- eliminateCol(pml.train, excl.list)
+pml.test <- eliminateCol(pml.test, excl.list)
+```
+
+#####4. Remove correlated variables
+It is obvious that highly correlated variables would not contribute much on the training. In order to find the highly correlated variables, we calculate the correlation matrix first. It is noted that the factor variables should not be present in the correlation matrix. Also, all variables having correlation greater 0.75b are considered as highly correlated
+
+```{r, echo=TRUE}
+pmlCor <-  cor(pml.train[sapply(pml.train, function(x) !is.factor(x))])
+highlyCor <- findCorrelation(pmlCor, cutoff = .75)
+length(highlyCor)
+```
+
+The analysis shows that we could eliminate up to 20 highly correlated variables. This leaves our data with 34 variables only.
+
+```{r, echo=TRUE}
+pml.train <- pml.train[,-highlyCor]
+pml.test <- pml.test[, -highlyCor]
+```
+
+###Split the data
+Let's divide the data into training and testing set. The ratio is 75/25
+```{r, echo=TRUE}
+trainIndex = createDataPartition(pml.train$classe, p=0.75, list=FALSE)
+training = pml.train[ trainIndex, ]
+testing = pml.train[ - trainIndex, ]
+```
+
+###Train data and fit the model
+We fit a model using random forest method
+```{r, echo=TRUE}
+set.seed(33833)
+modFit <- train(classe ~ ., method = "rf", data=training)
+```
+
+Now we test the accuracy of the classifier
+```{r, echo=TRUE}
+predicted <- predict(modFit, newdata = training)
+table(predicted == training$classe)
+predicted2 <- predict(modFit, newdata = testing)
+table(predicted2 == testing$classe)
+```
+
+The accuracy is very high, giving us a strong confidence on the classification. Indeed, when it comes to error estimation, we could use the confusionMatrix function to calculate the in-sample and out-of-sample error as follows:
+
+```{r, echo=TRUE}
+#In-sample error
+confusionMatrix(table(predicted, training$classe))$overall
+#Out-of-sample error
+confusionMatrix(table(predicted2, testing$classe))$overall
+```
+
+The in-sample and out-of-sample error are 0 and 0.0018352 respectively, which suggests a strongly accurate classification model.  
+
+###Test with the provided testing data
+We use the fit model to test with the testing data from the problem
+```{r, echo=TRUE}
+predicted3 <- predict(modFit, newdata = pml.test)
+predicted3
+```
+
+Write the output into 20 separated files.
+```{r, echo=TRUE}
+pml_write_files = function(x){
+  n = length(x)
+  for(i in 1:n){
+    filename = paste0("problem_id_",i,".txt")
+    write.table(x[i],file=filename,quote=FALSE,row.names=FALSE,col.names=FALSE)
+  }
+}
+pml_write_files(predicted3)
+```
+
+##Conclusion
+The practice of machine learning found a highly accurate classification model by using the random forest method (the in-sample and out-of-sample errors were estimated as approximately 0). By using this classification model, the 20 test cases were predicted with an accuracy of 100%. It is also noted that the analysis did not performe any cross-validation as it is unnecessary in rain-forest method.     
